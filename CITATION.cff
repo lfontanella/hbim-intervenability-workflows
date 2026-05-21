@@ -1,0 +1,48 @@
+cff-version: 1.2.0
+title: "HBIM Intervenability Workflows"
+message: "If you use this repository, please cite it as below."
+type: software
+
+authors:
+  - family-names: Fontanella
+    given-names: Luca
+    email: luca.fontanella@gmail.com
+    affiliation: "Università Iuav di Venezia"
+
+repository-code: "https://github.com/lfontanella/hbim-intervenability-workflows"
+
+abstract: >
+  HBIM/BIM workflows for assessing intervention feasibility and intervenability
+  in existing and heritage buildings. The repository documents a Revit, Dynamo,
+  Python and Excel-based workflow developed as part of a PhD research project
+  on BIM, HBIM, openBIM and digital procedures for heritage-oriented decision
+  support.
+
+keywords:
+  - HBIM
+  - BIM
+  - openBIM
+  - Revit
+  - Dynamo
+  - Python
+  - Excel
+  - intervenability
+  - heritage buildings
+  - existing buildings
+  - conservation
+  - decision support
+  - facility management
+
+license: MIT
+version: "1.0.0"
+date-released: "2026-05-20"
+
+preferred-citation:
+  type: thesis
+  title: "Utilizzo della metodologia BIM (Building Information Modeling) e degli standard openBIM per le analisi e il monitoraggio delle prestazioni termiche di edifici storici"
+  authors:
+    - family-names: Fontanella
+      given-names: Luca
+  institution:
+    name: "Università Iuav di Venezia"
+  year: 2026
