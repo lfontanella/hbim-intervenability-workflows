@@ -1,0 +1,6 @@
+{"project_code": "AdD_Dynamo",
+"input_folder_path": "..\\AdD_Dynamo\\IN",
+"output_folder_path": "..\\AdD_Dynamo\\OUT",
+"input_file_name": "InputDataLFO.xlsx",
+"queries_sheet_name": "QUERIES_Dynamo",
+"elements_sheet_name": "ELEMENTS_Dynamo"}
