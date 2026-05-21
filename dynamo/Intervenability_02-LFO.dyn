@@ -1,0 +1,489 @@
+{
+  "Uuid": "afea04e8-da83-40f5-8e69-6cef7d7d059c",
+  "IsCustomNode": false,
+  "Description": "",
+  "Name": "Intervenability_02-LFO",
+  "ElementResolver": {
+    "ResolutionMap": {}
+  },
+  "Inputs": [],
+  "Outputs": [],
+  "Nodes": [
+    {
+      "ConcreteType": "CoreNodeModels.Input.StringInput, CoreNodeModels",
+      "Id": "29f5cf4035a04ebda440e8a0db489600",
+      "NodeType": "StringInputNode",
+      "Inputs": [],
+      "Outputs": [
+        {
+          "Id": "d394451b87294080a124400de2aa6427",
+          "Name": "",
+          "Description": "String",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Crea una stringa.",
+      "InputValue": "C:\\PATH\\TO\\hbim-intervenability-workflows\\START.json"
+    },
+    {
+      "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
+      "Code": "import sys, os, json, re, subprocess\r\n\r\n# --- Dynamo / Revit plumbing ---\r\nimport clr\r\n\r\nclr.AddReference(\"RevitServices\")\r\nfrom RevitServices.Persistence import DocumentManager\r\nfrom RevitServices.Transactions import TransactionManager\r\n\r\nclr.AddReference(\"RevitAPI\")\r\nfrom Autodesk.Revit.DB import (\r\n    SpecTypeId,\r\n    FilteredElementCollector,\r\n    BuiltInCategory,\r\n    ElementCategoryFilter,\r\n    LogicalOrFilter,\r\n    Color,\r\n    OverrideGraphicSettings,\r\n    FillPatternElement,\r\n)\r\n\r\ndoc = DocumentManager.Instance.CurrentDBDocument\r\nuidoc = DocumentManager.Instance.CurrentUIApplication.ActiveUIDocument\r\n\r\n\r\n# ---------------------------------------------------------------------------\r\n# INPUTS FROM DYNAMO\r\n# ---------------------------------------------------------------------------\r\n\r\n# IN[0] = list of Revit parameters to export\r\n# IN[1] = path to START.json\r\n# IN[2] = apply colours in active view, True/False\r\n# IN[3] = optional path to external Python executable\r\n# IN[4] = optional path to external Python script\r\n# IN[5] = trigger / unused\r\n\r\ns_parameter = IN[0]\r\nstart0_file_pathandname = IN[1]\r\napply_in_active_view = bool(IN[2])\r\n\r\npython_exe_input = IN[3] if len(IN) > 3 else None\r\nexternal_script_input = IN[4] if len(IN) > 4 else None\r\n_ = IN[5] if len(IN) > 5 else None\r\n\r\n\r\n# ---------------------------------------------------------------------------\r\n# PATH HELPERS\r\n# ---------------------------------------------------------------------------\r\n\r\ndef norm(path):\r\n    return os.path.normpath(str(path))\r\n\r\n\r\ndef is_empty(value):\r\n    if value is None:\r\n        return True\r\n    if str(value).strip() in [\"\", \"?\", \"None\", \"null\"]:\r\n        return True\r\n    return False\r\n\r\n\r\ndef must_exist(path, label):\r\n    if not path or not os.path.exists(path):\r\n        raise Exception(\"{} not found: {}\".format(label, path))\r\n\r\n\r\ndef ensure_parent_dir(path):\r\n    directory = os.path.dirname(path)\r\n    if directory and not os.path.exists(directory):\r\n        os.makedirs(directory)\r\n\r\n\r\nmust_exist(start0_file_pathandname, \"START.json\")\r\n\r\nBASE_DIR = norm(os.path.dirname(start0_file_pathandname))\r\n\r\n\r\n# ---------------------------------------------------------------------------\r\n# READ CONFIGURATION FILES\r\n# ---------------------------------------------------------------------------\r\n\r\nwith open(start0_file_pathandname, \"r\", encoding=\"utf-8\") as file:\r\n    start0 = json.load(file)\r\n\r\nstart_file_name = start0.get(\"start_file_name\", \"START - AdD - Dynamo.json\")\r\nstart_file_pathandname = norm(os.path.join(BASE_DIR, start_file_name))\r\n\r\nmust_exist(start_file_pathandname, \"START - AdD - Dynamo.json\")\r\n\r\nwith open(start_file_pathandname, \"r\", encoding=\"utf-8\") as file:\r\n    cfg = json.load(file)\r\n\r\ninput_file_name = cfg.get(\"input_file_name\", \"InputDataLFO.xlsx\")\r\nelements_sheet_name = cfg.get(\"elements_sheet_name\", \"ELEMENTS_Dynamo\")\r\n\r\n\r\n# ---------------------------------------------------------------------------\r\n# LOCAL WORKFLOW FOLDERS\r\n# ---------------------------------------------------------------------------\r\n\r\n# The repository structure is expected to be:\r\n#\r\n# hbim-intervenability-workflows/\r\n# ├── START.json\r\n# ├── START - AdD - Dynamo.json\r\n# ├── python/\r\n# │   └── Intervenability_01-LFO.py\r\n# ├── dynamo/\r\n# │   └── Intervenability_02-LFO.dyn\r\n# └── AdD_Dynamo/\r\n#     ├── IN/\r\n#     │   └── InputDataLFO.xlsx\r\n#     └── OUT/\r\n#         └── Intervenability_RESULTS.xlsx\r\n\r\nIN_DIR = norm(os.path.join(BASE_DIR, \"AdD_Dynamo\", \"IN\"))\r\nOUT_DIR = norm(os.path.join(BASE_DIR, \"AdD_Dynamo\", \"OUT\"))\r\n\r\nINPUT_XLSX = norm(os.path.join(IN_DIR, input_file_name))\r\nRESULTS_XLSX_DEFAULT = norm(os.path.join(OUT_DIR, \"Intervenability_RESULTS.xlsx\"))\r\n\r\n\r\n# ---------------------------------------------------------------------------\r\n# EXTERNAL SCRIPT AND PYTHON EXECUTABLE\r\n# ---------------------------------------------------------------------------\r\n\r\nif not is_empty(external_script_input):\r\n    external_script_path = norm(external_script_input)\r\nelse:\r\n    external_script_path = norm(\r\n        os.path.join(BASE_DIR, \"python\", \"Intervenability_01-LFO.py\")\r\n    )\r\n\r\nmust_exist(external_script_path, \"Intervenability_01-LFO.py\")\r\n\r\nif not is_empty(python_exe_input):\r\n    PYTHON_EXE = norm(python_exe_input)\r\nelse:\r\n    # Fallback: use the Python executable available to the current environment.\r\n    # In many Revit/Dynamo setups, users may need to pass their external Python\r\n    # executable explicitly through IN[3].\r\n    PYTHON_EXE = sys.executable\r\n\r\nmust_exist(PYTHON_EXE, \"Python executable\")\r\n\r\n\r\n# ---------------------------------------------------------------------------\r\n# REVIT HELPERS\r\n# ---------------------------------------------------------------------------\r\n\r\ndef get_elements_of_categories(document):\r\n    categories = [\r\n        BuiltInCategory.OST_Walls,\r\n        BuiltInCategory.OST_Floors,\r\n        BuiltInCategory.OST_Ceilings,\r\n        BuiltInCategory.OST_Windows,\r\n        BuiltInCategory.OST_Doors,\r\n    ]\r\n\r\n    filters = [ElementCategoryFilter(category) for category in categories]\r\n    or_filter = LogicalOrFilter(filters)\r\n\r\n    collector = (\r\n        FilteredElementCollector(document)\r\n        .WherePasses(or_filter)\r\n        .WhereElementIsNotElementType()\r\n    )\r\n\r\n    return sorted(list(collector), key=lambda element: element.UniqueId)\r\n\r\n\r\ndef get_solid_fill_pattern_id(document):\r\n    fill_patterns = FilteredElementCollector(document).OfClass(FillPatternElement)\r\n\r\n    for fill_pattern_element in fill_patterns:\r\n        try:\r\n            if fill_pattern_element.GetFillPattern().IsSolidFill:\r\n                return fill_pattern_element.Id\r\n        except Exception:\r\n            pass\r\n\r\n    return None\r\n\r\n\r\ndef hex_to_revit_color(hex_string):\r\n    value = str(hex_string).strip()\r\n\r\n    if value.startswith(\"#\"):\r\n        value = value[1:]\r\n\r\n    if len(value) != 6:\r\n        raise ValueError(\"Invalid colour value: {}\".format(hex_string))\r\n\r\n    red = int(value[0:2], 16)\r\n    green = int(value[2:4], 16)\r\n    blue = int(value[4:6], 16)\r\n\r\n    return Color(red, green, blue)\r\n\r\n\r\n# ---------------------------------------------------------------------------\r\n# PARAMETER READING\r\n# ---------------------------------------------------------------------------\r\n\r\ndef read_params(element, parameter_names):\r\n    element_unique_id = element.UniqueId\r\n    values = []\r\n\r\n    for parameter_name in parameter_names:\r\n        value = \"?\"\r\n\r\n        if parameter_name == \"Code\":\r\n            value = element_unique_id\r\n\r\n        elif parameter_name == \"Type\":\r\n            value = element.Category.Name if element.Category else None\r\n\r\n        else:\r\n            try:\r\n                parameter = element.LookupParameter(parameter_name)\r\n\r\n                if parameter is None:\r\n                    value = None\r\n\r\n                else:\r\n                    if parameter.StorageType == 1:\r\n                        value = parameter.AsInteger()\r\n                    elif parameter.StorageType == 2:\r\n                        value = parameter.AsDouble()\r\n                    elif parameter.StorageType == 3:\r\n                        value = parameter.AsString()\r\n                    else:\r\n                        value = str(parameter)\r\n\r\n                    # Unit conversion where applicable.\r\n                    try:\r\n                        measure = parameter.Definition.GetDataType()\r\n\r\n                        if measure == SpecTypeId.Length:\r\n                            value = value * 0.3048\r\n                        elif measure == SpecTypeId.Area:\r\n                            value = value * 0.3048 * 0.3048\r\n                        elif measure == SpecTypeId.Volume:\r\n                            value = value * 0.3048 * 0.3048 * 0.3048\r\n                        elif measure == SpecTypeId.Temperature:\r\n                            value = value - 273.15\r\n                        elif measure == SpecTypeId.TemperatureDifference:\r\n                            value = value\r\n                        elif measure == SpecTypeId.Angle:\r\n                            value = value\r\n                        elif measure == SpecTypeId.Slope:\r\n                            value = value\r\n                        elif measure == SpecTypeId.Number:\r\n                            value = value\r\n                    except Exception:\r\n                        pass\r\n\r\n            except Exception:\r\n                try:\r\n                    value = str(value)\r\n                except Exception:\r\n                    value = \"\"\r\n\r\n        values.append(value)\r\n\r\n    return values\r\n\r\n\r\n# ---------------------------------------------------------------------------\r\n# 1. EXPORT REVIT ELEMENTS TO INPUT EXCEL FILE\r\n# ---------------------------------------------------------------------------\r\n\r\nelements = get_elements_of_categories(doc)\r\n\r\nrows = [list(s_parameter)]\r\n\r\nfor element in elements:\r\n    rows.append(read_params(element, s_parameter))\r\n\r\nensure_parent_dir(INPUT_XLSX)\r\n\r\nimport openpyxl\r\nfrom openpyxl import Workbook\r\n\r\nif os.path.exists(INPUT_XLSX):\r\n    workbook = openpyxl.load_workbook(INPUT_XLSX)\r\n\r\n    if elements_sheet_name in workbook.sheetnames:\r\n        old_sheet = workbook[elements_sheet_name]\r\n        workbook.remove(old_sheet)\r\n\r\nelse:\r\n    workbook = Workbook()\r\n\r\n    try:\r\n        workbook.remove(workbook.active)\r\n    except Exception:\r\n        pass\r\n\r\nworksheet = workbook.create_sheet(elements_sheet_name)\r\n\r\nfor row in rows:\r\n    worksheet.append(row)\r\n\r\nworkbook.save(INPUT_XLSX)\r\n\r\n\r\n# ---------------------------------------------------------------------------\r\n# 2. RUN EXTERNAL PYTHON SCRIPT\r\n# ---------------------------------------------------------------------------\r\n\r\nexternal_exit_code = None\r\nexternal_stdout = \"\"\r\nexternal_stderr = \"\"\r\n\r\ntry:\r\n    process = subprocess.Popen(\r\n        [PYTHON_EXE, external_script_path],\r\n        stdout=subprocess.PIPE,\r\n        stderr=subprocess.PIPE,\r\n        shell=False,\r\n    )\r\n\r\n    stdout_bytes, stderr_bytes = process.communicate()\r\n\r\n    external_exit_code = process.returncode\r\n    external_stdout = stdout_bytes.decode(\"utf-8\", \"ignore\")\r\n    external_stderr = stderr_bytes.decode(\"utf-8\", \"ignore\")\r\n\r\nexcept Exception as error:\r\n    external_exit_code = -2\r\n    external_stderr = \"Subprocess error: {}\".format(error)\r\n\r\n\r\n# ---------------------------------------------------------------------------\r\n# 3. FIND RESULTS FILE\r\n# ---------------------------------------------------------------------------\r\n\r\nresults_candidates = [\r\n    RESULTS_XLSX_DEFAULT,\r\n    norm(os.path.join(IN_DIR, \"Intervenability_RESULTS.xlsx\")),\r\n]\r\n\r\n# Try to read the exact path from stdout if the external script printed it.\r\nmatch = re.search(\r\n    r\"Salvato Excel risultati:\\s*(.+Intervenability_RESULTS\\.xlsx)\",\r\n    external_stdout,\r\n)\r\n\r\nif match:\r\n    candidate = norm(match.group(1).strip())\r\n\r\n    allowed_root = norm(os.path.join(BASE_DIR, \"AdD_Dynamo\"))\r\n\r\n    if candidate.startswith(allowed_root):\r\n        results_candidates.insert(0, candidate)\r\n\r\n# Remove duplicates while preserving order.\r\nseen = set()\r\nunique_results_candidates = []\r\n\r\nfor candidate in results_candidates:\r\n    if candidate not in seen:\r\n        seen.add(candidate)\r\n        unique_results_candidates.append(candidate)\r\n\r\nresults_candidates = unique_results_candidates\r\n\r\nresults_found_path = None\r\n\r\nfor candidate in results_candidates:\r\n    if os.path.exists(candidate):\r\n        results_found_path = candidate\r\n        break\r\n\r\n\r\n# ---------------------------------------------------------------------------\r\n# 4. APPLY COLOURS TO ACTIVE REVIT VIEW\r\n# ---------------------------------------------------------------------------\r\n\r\napplied = 0\r\nerrors = []\r\n\r\nif apply_in_active_view:\r\n    if results_found_path is None:\r\n        errors.append(\r\n            \"Results not found. Checked paths: {}\".format(results_candidates)\r\n        )\r\n\r\n    else:\r\n        try:\r\n            results_workbook = openpyxl.load_workbook(\r\n                results_found_path,\r\n                data_only=True,\r\n            )\r\n\r\n            if \"SUMMARY\" not in results_workbook.sheetnames:\r\n                raise Exception(\r\n                    \"Sheet 'SUMMARY' not found in {}\".format(results_found_path)\r\n                )\r\n\r\n            summary_sheet = results_workbook[\"SUMMARY\"]\r\n\r\n            header = [\r\n                str(cell.value).strip() if cell.value is not None else \"\"\r\n                for cell in summary_sheet[1]\r\n            ]\r\n\r\n            def column_index(name):\r\n                return header.index(name) if name in header else None\r\n\r\n            index_code = column_index(\"Code\")\r\n            index_r = column_index(\"R\")\r\n            index_g = column_index(\"G\")\r\n            index_b = column_index(\"B\")\r\n            index_hex = column_index(\"ColourHex\")\r\n\r\n            if index_code is None:\r\n                raise Exception(\"Column 'Code' is missing in SUMMARY.\")\r\n\r\n            color_map = {}\r\n\r\n            for row in summary_sheet.iter_rows(min_row=2, values_only=True):\r\n                if not row:\r\n                    continue\r\n\r\n                code = row[index_code]\r\n\r\n                if code is None:\r\n                    continue\r\n\r\n                code = str(code).strip()\r\n\r\n                # Prefer RGB columns.\r\n                if (\r\n                    index_r is not None\r\n                    and index_g is not None\r\n                    and index_b is not None\r\n                    and row[index_r] is not None\r\n                ):\r\n                    try:\r\n                        red = int(float(row[index_r]))\r\n                        green = int(float(row[index_g]))\r\n                        blue = int(float(row[index_b]))\r\n\r\n                        red = max(0, min(255, red))\r\n                        green = max(0, min(255, green))\r\n                        blue = max(0, min(255, blue))\r\n\r\n                        color_map[code] = (red, green, blue)\r\n                        continue\r\n\r\n                    except Exception:\r\n                        pass\r\n\r\n                # Fallback to HEX colour.\r\n                if index_hex is not None and row[index_hex]:\r\n                    try:\r\n                        revit_colour = hex_to_revit_color(row[index_hex])\r\n                        color_map[code] = (\r\n                            revit_colour.Red,\r\n                            revit_colour.Green,\r\n                            revit_colour.Blue,\r\n                        )\r\n                    except Exception:\r\n                        pass\r\n\r\n            solid_fill_id = get_solid_fill_pattern_id(doc)\r\n\r\n            if solid_fill_id is None:\r\n                raise Exception(\"Solid Fill pattern not found.\")\r\n\r\n            active_view = uidoc.ActiveView if uidoc else None\r\n\r\n            if active_view is None:\r\n                raise Exception(\"Active view not available.\")\r\n\r\n            TransactionManager.Instance.EnsureInTransaction(doc)\r\n\r\n            for element in elements:\r\n                unique_id = element.UniqueId\r\n\r\n                if unique_id not in color_map:\r\n                    continue\r\n\r\n                red, green, blue = color_map[unique_id]\r\n                revit_colour = Color(red, green, blue)\r\n\r\n                overrides = OverrideGraphicSettings()\r\n                overrides.SetSurfaceForegroundPatternId(solid_fill_id)\r\n                overrides.SetSurfaceForegroundPatternColor(revit_colour)\r\n                overrides.SetProjectionLineColor(revit_colour)\r\n\r\n                active_view.SetElementOverrides(element.Id, overrides)\r\n                applied += 1\r\n\r\n            TransactionManager.Instance.TransactionTaskDone()\r\n\r\n        except Exception as error:\r\n            errors.append(\"Colour application failed: {}\".format(error))\r\n\r\nelse:\r\n    errors.append(\"apply_in_active_view = False\")\r\n\r\n\r\n# ---------------------------------------------------------------------------\r\n# OUTPUT TO DYNAMO\r\n# ---------------------------------------------------------------------------\r\n\r\nOUT = {\r\n    \"BASE_DIR\": BASE_DIR,\r\n    \"IN_DIR\": IN_DIR,\r\n    \"OUT_DIR\": OUT_DIR,\r\n    \"input_written\": INPUT_XLSX,\r\n    \"elements_exported\": len(elements),\r\n    \"external_script\": external_script_path,\r\n    \"python_exe\": PYTHON_EXE,\r\n    \"external_exit_code\": external_exit_code,\r\n    \"external_stdout\": external_stdout,\r\n    \"external_stderr\": external_stderr,\r\n    \"results_candidates\": results_candidates,\r\n    \"results_found_path\": results_found_path,\r\n    \"apply_in_active_view\": apply_in_active_view,\r\n    \"colors_applied\": applied,\r\n    \"errors\": errors,\r\n}",
+      "Engine": "CPython3",
+      "EngineName": "CPython3",
+      "VariableInputPorts": true,
+      "Id": "7bf3d439706845e990982fa709430201",
+      "NodeType": "PythonScriptNode",
+      "Inputs": [
+        {
+          "Id": "494ce212346e4306a944957fa5f973ec",
+          "Name": "IN[0]",
+          "Description": "Input #0",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "13fe085a4f7842bfbad70276b3adb436",
+          "Name": "IN[1]",
+          "Description": "Input #1",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "29327c55a68543278ac49b4806f949e8",
+          "Name": "IN[2]",
+          "Description": "Input #2",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "001ea47100e34836a452673baa0a2b75",
+          "Name": "IN[3]",
+          "Description": "Input #3",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "09c4155db770478d85fbe799af930e46",
+          "Name": "IN[4]",
+          "Description": "Input #4",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "af72b1d57f5b4ed9b3bc43389c3a78f6",
+          "Name": "IN[5]",
+          "Description": "Input #5",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "321a8d1516c44b1cbe6775ebe11409bf",
+          "Name": "OUT",
+          "Description": "Risultato dello script Python",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Esegue uno script Python incorporato."
+    },
+    {
+      "ConcreteType": "Dynamo.Graph.Nodes.CodeBlockNodeModel, DynamoCore",
+      "Id": "0b4c6235b7b54b288af67e488df15fdb",
+      "NodeType": "CodeBlockNode",
+      "Inputs": [],
+      "Outputs": [
+        {
+          "Id": "1cf04942fbe44f478b7f55b479b79511",
+          "Name": "",
+          "Description": "Valore dell'espressione alla riga 1",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Consente la creazione diretta di codice DesignScript",
+      "Code": "[\"Code\",\"Type\",\"ThroughHole_Position\",\"ThroughHole_Diameter_Max\",\"Opening_Reduction_Height_SuspCeiling_Length_Max\",\"Opening_Reduction_Height_RaisedFloor_Length_Max\",\"Opening_Reduction_Width_Side_Length_Max\",\"Perforation_Depth_Max\",\"Perforation_Diameter_Max\",\"Perforation_Position\",\"Perforation_Length\",\"Perforation_Width\",\"SurfCov_Level\",\"CutOut_Depth_Max\",\"CutOut_Width_Max\",\"Attic_IsAccessible\",\"Attic_IsWalkable\",\"AtticFloor_CanBeCovered\",\"Bonding\",\"Leaning\",\"DemolitionOfLayers_Depth_Max\",\"Demolition\",\"Excavation\",\"Infill\",\"UseAsADuctSpace_Side_Max\",\"UseAsADuctSpace_Side_Min\"];"
+    },
+    {
+      "ConcreteType": "CoreNodeModels.Input.BoolSelector, CoreNodeModels",
+      "Id": "3c7c4dc2b4674711ac483c3c20c7adb9",
+      "NodeType": "BooleanInputNode",
+      "Inputs": [],
+      "Outputs": [
+        {
+          "Id": "1e64b457882d45389f517f505b1daffc",
+          "Name": "",
+          "Description": "Boolean",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Consente la selezione tra True e False.",
+      "InputValue": true
+    },
+    {
+      "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
+      "Code": "import sys, os, io\r\n\r\n# --- Dynamo / Revit plumbing ---\r\nimport clr\r\nclr.AddReference('RevitServices')\r\nfrom RevitServices.Persistence import DocumentManager\r\nfrom RevitServices.Transactions import TransactionManager\r\n\r\nclr.AddReference('RevitAPI')\r\nfrom Autodesk.Revit.DB import (\r\n    FilteredElementCollector, BuiltInCategory, ElementCategoryFilter, LogicalOrFilter,\r\n    Element, Color, OverrideGraphicSettings, FillPatternElement, FillPatternTarget, View\r\n)\r\ndoc = DocumentManager.Instance.CurrentDBDocument\r\nuidoc = DocumentManager.Instance.CurrentUIApplication.ActiveUIDocument\r\n\r\n# --- Inputs ---\r\ns_parameter = IN[0]\r\nstart0_file_pathandname = IN[1]\r\napply_in_active_view = bool(IN[2])\r\ndiameter = IN[3]\r\nduct_size_1 = IN[4]\r\nduct_size_2 = IN[5]\r\nOUT = {}\r\nOUT['s_parameter'] = s_parameter\r\n# --- Helpers ---\r\ndef get_elements_of_categories(document):\r\n    s_category = [\r\n        BuiltInCategory.OST_Walls,\r\n        BuiltInCategory.OST_Floors,\r\n        BuiltInCategory.OST_Ceilings,\r\n        BuiltInCategory.OST_Windows,\r\n        BuiltInCategory.OST_Doors\r\n    ]\r\n    s_filter = [ElementCategoryFilter(category) for category in s_category]\r\n    or_filter = LogicalOrFilter(s_filter)\r\n    column = FilteredElementCollector(document).WherePasses(or_filter).WhereElementIsNotElementType()\r\n    # stable order: sort by UniqueId\r\n    s_element = sorted(list(column), key=lambda e: e.UniqueId)\r\n    return s_element\r\n\r\ndef read_params(e, s_parameter):\r\n    s_converter = {'AtticFloor_CanBeCovered': {'No': 'FALSE', 'Sì': 'TRUE'},\r\n                    'Leaning': {'No': 'FALSE', 'Sì': 'TRUE'},\r\n                    'Bonding': {'No': 'FALSE', 'Sì': 'TRUE'},\r\n                    'Infill': {'No': 'FALSE', 'Sì': 'TRUE'},\r\n                    'Demolition': {'No': 'FALSE', 'Sì': 'TRUE'},\r\n                    'Type': {'Pavimenti': 'Surface:Floor:InnerSide',\r\n                            'Muri': 'Surface:Wall:InnerSide',\r\n                            'Controsoffitti': 'Surface:Ceiling:InnerSide',\r\n                            'Tetti': 'Surface:Roof:InnerSide',\r\n                            'Porte': 'Door/Window',\r\n                            'Finestre': 'Door/Window'}}\r\n    id = e.UniqueId\r\n    OUT[id] = {}\r\n    s_value = []\r\n    OUT[e.UniqueId]['vals'] = []\r\n    for parameter in s_parameter:\r\n        value = '?'\r\n        if parameter == 'Code':\r\n            value = id\r\n        elif parameter == 'Type':\r\n            value = e.Category.Name if e.Category else None\r\n        else:\r\n            try:\r\n                value = e.LookupParameter(parameter)\r\n                if value.StorageType == 1:\r\n                    value = value.AsInteger()\r\n                elif value.StorageType == 2:\r\n                    value = value.AsDouble()\r\n                elif value.StorageType == 3:\r\n                    value = value.AsString()\r\n                else:\r\n                    value = str(value)\r\n            except:\r\n                try:\r\n                    value = str(value)\r\n                except:\r\n                    value = \"\"\r\n            measure = '?'\r\n            try:\r\n                measure = p.Definition.GetDataType()\r\n                if measure == SpecTypeId.Length:\r\n                    value = value * 0.3048\r\n                elif measure == SpecTypeId.Area:\r\n                    value = value * 0.3048 * 0.3048\r\n                elif measure == SpecTypeId.Volume:\r\n                    value = value * 0.3048 * 0.3048 * 0.3048\r\n                elif measure == SpecTypeId.Temperature:\r\n                    value = value - 273.15\r\n                elif measure == SpecTypeId.TemperatureDifference:\r\n                    value = value\r\n                elif measure == SpecTypeId.Angle:\r\n                    value = value\r\n                elif measure == SpecTypeId.Slope:\r\n                    value = value\r\n                elif measure == SpecTypeId.Number:\r\n                    value = value\r\n            except:\r\n                pass\r\n            OUT[e.UniqueId][parameter] = measure\r\n        #OUT[id]['vals'].append(value.StorageType.Integer)\r\n        \r\n        #if parameter in list(s_converter.keys()):\r\n        #    value = s_converter[parameter][value]\r\n        s_value.append(value)\r\n    return s_value\r\n\r\ndef ensure_dir(path):\r\n    d = os.path.dirname(path)\r\n    if d and not os.path.exists(d):\r\n        os.makedirs(d)\r\n\r\ndef write_xlsx_or_csv(rows, xlsx_path, sheet):\r\n    \"\"\"\r\n    rows: list of lists (including header)\r\n    tries openpyxl; if unavailable or fails, writes CSV fallback\r\n    returns: {\"path\": written_path, \"format\": \"xlsx\"|\"csv\"}\r\n    \"\"\"\r\n    ensure_dir(xlsx_path)\r\n    # try openpyxl\r\n    try:\r\n        import openpyxl\r\n        from openpyxl import Workbook\r\n        if os.path.exists(xlsx_path):\r\n            wb = openpyxl.load_workbook(xlsx_path)\r\n            if sheet in wb.sheetnames:\r\n                ws = wb[sheet]\r\n                # clear the sheet\r\n                wb.remove(ws)\r\n                ws = wb.create_sheet(sheet)\r\n            else:\r\n                ws = wb.create_sheet(sheet)\r\n        else:\r\n            wb = Workbook()\r\n            ws = wb.active\r\n            ws.title = sheet\r\n        for r in rows:\r\n            ws.append(r)\r\n        wb.save(xlsx_path)\r\n        return {\"path\": xlsx_path, \"format\": \"xlsx\"}\r\n    except Exception as ex:\r\n        # csv fallback\r\n        csv_path = os.path.splitext(xlsx_path)[0] + \".csv\"\r\n        import csv\r\n        with io.open(csv_path, \"w\", encoding=\"utf-8\", newline=\"\") as f:\r\n            w = csv.writer(f, delimiter=';')\r\n            for r in rows:\r\n                w.writerow([u\"\" if v is None else v for v in r])\r\n        return {\"path\": csv_path, \"format\": \"csv\", \"note\": \"openpyxl non disponibile: scritto CSV\"}\r\n\r\ndef hex_to_revit_color(hexstr):\r\n    # accepts \"#RRGGBB\" or \"RRGGBB\"\r\n    s = hexstr.strip()\r\n    if s.startswith(\"#\"):\r\n        s = s[1:]\r\n    if len(s) != 6:\r\n        raise ValueError(\"Colore non valido: {}\".format(hexstr))\r\n    r = int(s[0:2], 16)\r\n    g = int(s[2:4], 16)\r\n    b = int(s[4:6], 16)\r\n    return Color(r, g, b)\r\n\r\ndef get_solid_fill_pattern_id(document):\r\n    # robust: trova il FillPatternElement con IsSolidFill True\r\n    fps = FilteredElementCollector(document).OfClass(FillPatternElement)\r\n    for fpe in fps:\r\n        try:\r\n            if fpe.GetFillPattern().IsSolidFill:\r\n                return fpe.Id\r\n        except:\r\n            pass\r\n    return None\r\n\r\ndef run_external_python(py_path):\r\n    \"\"\"\r\n    Esegue uno script Python esterno.\r\n    Preferisce usare sys.executable (CPython node); fallback a 'python'.\r\n    In IronPython usa System.Diagnostics.Process.\r\n    Ritorna (exitcode, stdout/stderr best-effort).\r\n    \"\"\"\r\n    if not py_path or not os.path.exists(py_path):\r\n        return (-1, \"Script Python non trovato: {}\".format(py_path))\r\n\r\n    try:\r\n        # Try CPython / subprocess\r\n        import subprocess\r\n        python_exec = sys.executable if sys.executable else \"python\"\r\n        proc = subprocess.Popen([python_exec, py_path],\r\n                                stdout=subprocess.PIPE,\r\n                                stderr=subprocess.PIPE,\r\n                                shell=False)\r\n        out, err = proc.communicate()\r\n        code = proc.returncode\r\n        text = (out.decode('utf-8', 'ignore') + \"\\n\" + err.decode('utf-8', 'ignore')).strip()\r\n        return (code, text)\r\n    except Exception as ex:\r\n        # IronPython fallback: System.Diagnostics.Process\r\n        try:\r\n            import System\r\n            from System.Diagnostics import Process, ProcessStartInfo\r\n            psi = ProcessStartInfo()\r\n            psi.FileName = \"python\"\r\n            psi.Arguments = '\"{}\"'.format(py_path)\r\n            psi.UseShellExecute = False\r\n            psi.RedirectStandardOutput = True\r\n            psi.RedirectStandardError = True\r\n            p = Process()\r\n            p.StartInfo = psi\r\n            p.Start()\r\n            p.WaitForExit()\r\n            out = p.StandardOutput.ReadToEnd()\r\n            err = p.StandardError.ReadToEnd()\r\n            return (p.ExitCode, (out + \"\\n\" + err))\r\n        except Exception as ex2:\r\n            return (-2, \"Impossibile eseguire lo script: {} | {}\".format(ex, ex2))\r\n\r\ndef read_output_colors(path_expected, n_expected):\r\n    \"\"\"\r\n    Ritorna lista di stringhe colore (lunghezza n_expected).\r\n    Ogni riga => es. '#AABBCC' (consentito anche senza '#').\r\n    \"\"\"\r\n    if not path_expected or not os.path.exists(path_expected):\r\n        raise IOError(\"File di output colori non trovato: {}\".format(path_expected))\r\n    s_color = []\r\n    with io.open(path_expected, 'r', encoding='utf-8') as f:\r\n        for line in f:\r\n            s = line.strip()\r\n            if s:\r\n                s_color.append(s)\r\n    if len(s_color) != n_expected:\r\n        raise ValueError(\"Numero colori ({}) diverso dal numero elementi esportati ({})\".format(len(s_color), n_expected))\r\n    return s_color\r\n# ______________________________________________\r\n# --- 1) Raccolta elementi e scrittura Excel ---\r\ns_element = get_elements_of_categories(doc)\r\ns_header = list(s_parameter)\r\ns_row = [s_header]\r\n\r\nfor e in s_element:\r\n    row = [e.UniqueId]\r\n    if s_parameter:\r\n        row += read_params(e, s_parameter)\r\n    s_row.append(row)\r\n\r\n\r\nimport json\r\nimport os\r\nstart0_file_content = '?'\r\nwith open(start0_file_pathandname, 'r') as file:\r\n    start0_file_content = json.load(file)\r\nstart_file_pathandname = os.path.normpath(os.path.join(os.path.join(start0_file_pathandname, \"..\\\\\"), start0_file_content['start_file_name']))\r\nstart_file_content = json.load(open(start_file_pathandname))\r\ninput_folder_path = start_file_content['input_folder_path']\r\ninput_folder_path = os.path.normpath(os.path.join(start_file_pathandname, input_folder_path))\r\noutput_folder_path = start_file_content['output_folder_path']\r\noutput_folder_path = os.path.normpath(os.path.join(start_file_pathandname, output_folder_path))\r\nexcel_file_pathandname = os.path.join(input_folder_path, start_file_content['input_file_name'])\r\nqueries_sheet_name = start_file_content['queries_sheet_name']\r\nelements_sheet_name = start_file_content['elements_sheet_name']\r\nexcel_info = write_xlsx_or_csv(s_row, excel_file_pathandname, elements_sheet_name)\r\npython_script_external_pathandname = os.path.normpath(os.path.join(start0_file_pathandname, \"..\\\\_CODE\\\\Intervenability_01.py\"))\r\nOUT['s_row'] = python_script_external_pathandname\r\n\r\n# --- 2) Esecuzione script esterno (opzionale, se fornito) ---\r\next_code = None\r\next_text = None\r\n\r\n#run_external_python(python_script_external_pathandname)\r\n\"\"\"\r\n# --- 3) Lettura output e applicazione colori (override in Active View) ---\r\napplied = 0\r\ns_error = []\r\nif python_script_external_pathandname:\r\n    try:\r\n        color_strings = read_output_colors(external_output_path, len(s_element))\r\n        # trova Solid Fill\r\n        solid_fill_id = get_solid_fill_pattern_id(doc)\r\n        if apply_in_active_view and solid_fill_id is not None and uidoc and uidoc.ActiveView:\r\n            v = uidoc.ActiveView\r\n            TransactionManager.Instance.EnsureInTransaction(doc)\r\n            for idx, e in enumerate(s_element):\r\n                try:\r\n                    column = hex_to_revit_color(color_strings[idx])\r\n                    ogs = OverrideGraphicSettings()\r\n                    # superfici\r\n                    ogs.SetSurfaceForegroundPatternId(solid_fill_id)\r\n                    ogs.SetSurfaceForegroundPatternColor(column)\r\n                    # linee\r\n                    ogs.SetProjectionLineColor(column)\r\n                    v.SetElementOverrides(e.Id, ogs)\r\n                    applied += 1\r\n                except Exception as ex:\r\n                    s_error.append(\"Errore colore per {}: {}\".format(e.UniqueId, ex))\r\n            TransactionManager.Instance.TransactionTaskDone()\r\n        else:\r\n            s_error.append(\"Override non applicato (Active View non disponibile o Solid Fill mancante).\")\r\n    except Exception as ex:\r\n        s_error.append(\"Lettura/applicazione colori fallita: {}\".format(ex))\r\n\r\n# --- Output report ---\r\nOUT['More'] = {\r\n    \"elements_exported\": len(s_element),\r\n    \"excel_written\": excel_info,\r\n    \"external_script\": {\"exit_code\": ext_code, \"output\": ext_text} if python_script_external_pathandname else None,\r\n    \"colors_applied\": applied,\r\n    \"errors\": s_error\r\n}\r\n\"\"\"\r\ndebug_dynamo_file_pathandname = os.path.join(output_folder_path, 'debug_dynamo.json')\r\nwith open(debug_dynamo_file_pathandname, 'w') as file:\r\n    json.dump(OUT, file)\r\n\r\npass",
+      "Engine": "CPython3",
+      "EngineName": "CPython3",
+      "VariableInputPorts": true,
+      "Id": "603e00b1763d45038acbf192e41357e9",
+      "NodeType": "PythonScriptNode",
+      "Inputs": [
+        {
+          "Id": "912aafb670964b92b83c6bc37aa0a83a",
+          "Name": "IN[0]",
+          "Description": "Input #0",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "dbdb38a57c864e669bba5349a451e478",
+          "Name": "IN[1]",
+          "Description": "Input #1",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "f0439bb9c75e4f70bfe80e24656d1371",
+          "Name": "IN[2]",
+          "Description": "Input #2",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "9f827d76eef747ecae4554417867bdae",
+          "Name": "IN[3]",
+          "Description": "Input #3",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "cbf71afde4044bc3a63c14ed66cab3bb",
+          "Name": "IN[4]",
+          "Description": "Input #4",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "c834beb9d2e4444b95bc976d0166d9d8",
+          "Name": "IN[5]",
+          "Description": "Input #5",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "cba39348914b4c8fa0f0d57f8f1a9ce8",
+          "Name": "OUT",
+          "Description": "Risultato dello script Python",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Esegue uno script Python incorporato."
+    },
+    {
+      "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
+      "Code": "import sys, os, io\r\n\r\n# --- Dynamo / Revit plumbing ---\r\nimport clr\r\nclr.AddReference('RevitServices')\r\nfrom RevitServices.Persistence import DocumentManager\r\nfrom RevitServices.Transactions import TransactionManager\r\nfrom Autodesk.Revit.DB import SpecTypeId\r\n\r\nclr.AddReference('RevitAPI')\r\nfrom Autodesk.Revit.DB import (\r\n    FilteredElementCollector, BuiltInCategory, ElementCategoryFilter, LogicalOrFilter,\r\n    Element, Color, OverrideGraphicSettings, FillPatternElement, FillPatternTarget, View\r\n)\r\n\r\ndoc = DocumentManager.Instance.CurrentDBDocument\r\nuidoc = DocumentManager.Instance.CurrentUIApplication.ActiveUIDocument\r\n\r\n# --- Inputs ---\r\ns_parameter = IN[0]\r\nstart0_file_pathandname = IN[1]\r\napply_in_active_view = bool(IN[2])\r\ndiameter = IN[3]\r\nduct_size_1 = IN[4]\r\nduct_size_2 = IN[5]\r\n\r\nOUT = {}\r\nOUT['s_parameter'] = s_parameter\r\n\r\n# --- Helpers ---\r\ndef get_elements_of_categories(document):\r\n    s_category = [\r\n        BuiltInCategory.OST_Walls,\r\n        BuiltInCategory.OST_Floors,\r\n        BuiltInCategory.OST_Ceilings,\r\n        BuiltInCategory.OST_Windows,\r\n        BuiltInCategory.OST_Doors\r\n    ]\r\n    s_filter = [ElementCategoryFilter(category) for category in s_category]\r\n    or_filter = LogicalOrFilter(s_filter)\r\n    column = FilteredElementCollector(document).WherePasses(or_filter).WhereElementIsNotElementType()\r\n    # stable order: sort by UniqueId\r\n    s_element = sorted(list(column), key=lambda e: e.UniqueId)\r\n    return s_element\r\n\r\ndef read_params(e, s_parameter):\r\n    s_converter = {\r\n        'AtticFloor_CanBeCovered': {'No': 'FALSE', 'Sì': 'TRUE'},\r\n        'Leaning': {'No': 'FALSE', 'Sì': 'TRUE'},\r\n        'Bonding': {'No': 'FALSE', 'Sì': 'TRUE'},\r\n        'Infill': {'No': 'FALSE', 'Sì': 'TRUE'},\r\n        'Demolition': {'No': 'FALSE', 'Sì': 'TRUE'},\r\n        'Type': {\r\n            'Pavimenti': 'Surface:Floor:InnerSide',\r\n            'Muri': 'Surface:Wall:InnerSide',\r\n            'Controsoffitti': 'Surface:Ceiling:InnerSide',\r\n            'Tetti': 'Surface:Roof:InnerSide',\r\n            'Porte': 'Door/Window',\r\n            'Finestre': 'Door/Window'\r\n        }\r\n    }\r\n\r\n    id = e.UniqueId\r\n    OUT[id] = {}\r\n    s_value = []\r\n    OUT[e.UniqueId]['vals'] = []\r\n\r\n    for parameter in s_parameter:\r\n        value = '?'\r\n\r\n        if parameter == 'Code':\r\n            value = id\r\n\r\n        elif parameter == 'Type':\r\n            value = e.Category.Name if e.Category else None\r\n\r\n        else:\r\n            # ======= FIX MINIMALE: usare SEMPRE \"p\" come parametro Revit =======\r\n            try:\r\n                p = e.LookupParameter(parameter)\r\n\r\n                if p is None:\r\n                    value = None\r\n                else:\r\n                    # leggo valore grezzo in base allo StorageType\r\n                    if p.StorageType == 1:\r\n                        value = p.AsInteger()\r\n                    elif p.StorageType == 2:\r\n                        value = p.AsDouble()\r\n                    elif p.StorageType == 3:\r\n                        value = p.AsString()\r\n                    else:\r\n                        value = str(p)\r\n\r\n                    # conversione unità (solo se applicabile)\r\n                    measure = '?'\r\n                    try:\r\n                        measure = p.Definition.GetDataType()\r\n\r\n                        if measure == SpecTypeId.Length:\r\n                            value = value * 0.3048\r\n                        elif measure == SpecTypeId.Area:\r\n                            value = value * 0.3048 * 0.3048\r\n                        elif measure == SpecTypeId.Volume:\r\n                            value = value * 0.3048 * 0.3048 * 0.3048\r\n                        elif measure == SpecTypeId.Temperature:\r\n                            value = value - 273.15\r\n                        elif measure == SpecTypeId.TemperatureDifference:\r\n                            value = value\r\n                        elif measure == SpecTypeId.Angle:\r\n                            value = value\r\n                        elif measure == SpecTypeId.Slope:\r\n                            value = value\r\n                        elif measure == SpecTypeId.Number:\r\n                            value = value\r\n                    except:\r\n                        pass\r\n\r\n                    OUT[e.UniqueId][parameter] = str(measure)\r\n\r\n            except:\r\n                try:\r\n                    value = str(value)\r\n                except:\r\n                    value = \"\"\r\n            # ================================================================\r\n\r\n        #OUT[id]['vals'].append(value.StorageType.Integer)\r\n\r\n        #if parameter in list(s_converter.keys()):\r\n        #    value = s_converter[parameter][value]\r\n\r\n        s_value.append(value)\r\n\r\n    return s_value\r\n\r\ndef ensure_dir(path):\r\n    d = os.path.dirname(path)\r\n    if d and not os.path.exists(d):\r\n        os.makedirs(d)\r\n\r\ndef write_xlsx_or_csv(rows, xlsx_path, sheet):\r\n    \"\"\"\r\n    rows: list of lists (including header)\r\n    tries openpyxl; if unavailable or fails, writes CSV fallback\r\n    returns: {\"path\": written_path, \"format\": \"xlsx\"|\"csv\"}\r\n    \"\"\"\r\n    ensure_dir(xlsx_path)\r\n    # try openpyxl\r\n    try:\r\n        import openpyxl\r\n        from openpyxl import Workbook\r\n        if os.path.exists(xlsx_path):\r\n            wb = openpyxl.load_workbook(xlsx_path)\r\n            if sheet in wb.sheetnames:\r\n                ws = wb[sheet]\r\n                # clear the sheet\r\n                wb.remove(ws)\r\n                ws = wb.create_sheet(sheet)\r\n            else:\r\n                ws = wb.create_sheet(sheet)\r\n        else:\r\n            wb = Workbook()\r\n            ws = wb.active\r\n            ws.title = sheet\r\n        for r in rows:\r\n            ws.append(r)\r\n        wb.save(xlsx_path)\r\n        return {\"path\": xlsx_path, \"format\": \"xlsx\"}\r\n    except Exception as ex:\r\n        # csv fallback\r\n        csv_path = os.path.splitext(xlsx_path)[0] + \".csv\"\r\n        import csv\r\n        with io.open(csv_path, \"w\", encoding=\"utf-8\", newline=\"\") as f:\r\n            w = csv.writer(f, delimiter=';')\r\n            for r in rows:\r\n                w.writerow([u\"\" if v is None else v for v in r])\r\n        return {\"path\": csv_path, \"format\": \"csv\", \"note\": \"openpyxl non disponibile: scritto CSV\"}\r\n\r\ndef hex_to_revit_color(hexstr):\r\n    # accepts \"#RRGGBB\" or \"RRGGBB\"\r\n    s = hexstr.strip()\r\n    if s.startswith(\"#\"):\r\n        s = s[1:]\r\n    if len(s) != 6:\r\n        raise ValueError(\"Colore non valido: {}\".format(hexstr))\r\n    r = int(s[0:2], 16)\r\n    g = int(s[2:4], 16)\r\n    b = int(s[4:6], 16)\r\n    return Color(r, g, b)\r\n\r\ndef get_solid_fill_pattern_id(document):\r\n    # robust: trova il FillPatternElement con IsSolidFill True\r\n    fps = FilteredElementCollector(document).OfClass(FillPatternElement)\r\n    for fpe in fps:\r\n        try:\r\n            if fpe.GetFillPattern().IsSolidFill:\r\n                return fpe.Id\r\n        except:\r\n            pass\r\n    return None\r\n\r\ndef run_external_python(py_path):\r\n    \"\"\"\r\n    Esegue uno script Python esterno.\r\n    Preferisce usare sys.executable (CPython node); fallback a 'python'.\r\n    In IronPython usa System.Diagnostics.Process.\r\n    Ritorna (exitcode, stdout/stderr best-effort).\r\n    \"\"\"\r\n    if not py_path or not os.path.exists(py_path):\r\n        return (-1, \"Script Python non trovato: {}\".format(py_path))\r\n\r\n    try:\r\n        # Try CPython / subprocess\r\n        import subprocess\r\n        python_exec = sys.executable if sys.executable else \"python\"\r\n        proc = subprocess.Popen([python_exec, py_path],\r\n                                stdout=subprocess.PIPE,\r\n                                stderr=subprocess.PIPE,\r\n                                shell=False)\r\n        out, err = proc.communicate()\r\n        code = proc.returncode\r\n        text = (out.decode('utf-8', 'ignore') + \"\\n\" + err.decode('utf-8', 'ignore')).strip()\r\n        return (code, text)\r\n    except Exception as ex:\r\n        # IronPython fallback: System.Diagnostics.Process\r\n        try:\r\n            import System\r\n            from System.Diagnostics import Process, ProcessStartInfo\r\n            psi = ProcessStartInfo()\r\n            psi.FileName = \"python\"\r\n            psi.Arguments = '\"{}\"'.format(py_path)\r\n            psi.UseShellExecute = False\r\n            psi.RedirectStandardOutput = True\r\n            psi.RedirectStandardError = True\r\n            p = Process()\r\n            p.StartInfo = psi\r\n            p.Start()\r\n            p.WaitForExit()\r\n            out = p.StandardOutput.ReadToEnd()\r\n            err = p.StandardError.ReadToEnd()\r\n            return (p.ExitCode, (out + \"\\n\" + err))\r\n        except Exception as ex2:\r\n            return (-2, \"Impossibile eseguire lo script: {} | {}\".format(ex, ex2))\r\n\r\ndef read_output_colors(path_expected, n_expected):\r\n    \"\"\"\r\n    Ritorna lista di stringhe colore (lunghezza n_expected).\r\n    Ogni riga => es. '#AABBCC' (consentito anche senza '#').\r\n    \"\"\"\r\n    if not path_expected or not os.path.exists(path_expected):\r\n        raise IOError(\"File di output colori non trovato: {}\".format(path_expected))\r\n    s_color = []\r\n    with io.open(path_expected, 'r', encoding='utf-8') as f:\r\n        for line in f:\r\n            s = line.strip()\r\n            if s:\r\n                s_color.append(s)\r\n    if len(s_color) != n_expected:\r\n        raise ValueError(\"Numero colori ({}) diverso dal numero elementi esportati ({})\".format(len(s_color), n_expected))\r\n    return s_color\r\n\r\n# ______________________________________________\r\n# --- 1) Raccolta elementi e scrittura Excel ---\r\ns_element = get_elements_of_categories(doc)\r\ns_header = list(s_parameter)\r\ns_row = [s_header]\r\n\r\nfor e in s_element:\r\n    row = []\r\n    if s_parameter:\r\n        row += read_params(e, s_parameter)\r\n    s_row.append(row)\r\n\r\nimport json\r\nimport os\r\n\r\nstart0_file_content = '?'\r\nwith open(start0_file_pathandname, 'r') as file:\r\n    start0_file_content = json.load(file)\r\n\r\nstart_file_pathandname = os.path.normpath(\r\n    os.path.join(os.path.join(start0_file_pathandname, \"..\\\\\"), start0_file_content['start_file_name'])\r\n)\r\nstart_file_content = json.load(open(start_file_pathandname))\r\n\r\ninput_folder_path = start_file_content['input_folder_path']\r\ninput_folder_path = os.path.normpath(os.path.join(start_file_pathandname, input_folder_path))\r\n\r\noutput_folder_path = start_file_content['output_folder_path']\r\noutput_folder_path = os.path.normpath(os.path.join(start_file_pathandname, output_folder_path))\r\n\r\nexcel_file_pathandname = os.path.join(input_folder_path, start_file_content['input_file_name'])\r\nqueries_sheet_name = start_file_content['queries_sheet_name']\r\nelements_sheet_name = start_file_content['elements_sheet_name']\r\n\r\nexcel_info = write_xlsx_or_csv(s_row, excel_file_pathandname, elements_sheet_name)\r\n\r\npython_script_external_pathandname = os.path.normpath(\r\n    os.path.join(start0_file_pathandname, \"..\\\\_CODE\\\\Intervenability_01-LFO.py\")\r\n)\r\nOUT['s_row'] = python_script_external_pathandname\r\n\r\n# --- 2) Esecuzione script esterno (opzionale, se fornito) ---\r\next_code = None\r\next_text = None\r\n\r\n#run_external_python(python_script_external_pathandname)\r\n\r\n\"\"\"\r\n# --- 3) Lettura output e applicazione colori (override in Active View) ---\r\napplied = 0\r\ns_error = []\r\nif python_script_external_pathandname:\r\n    try:\r\n        color_strings = read_output_colors(external_output_path, len(s_element))\r\n        # trova Solid Fill\r\n        solid_fill_id = get_solid_fill_pattern_id(doc)\r\n        if apply_in_active_view and solid_fill_id is not None and uidoc and uidoc.ActiveView:\r\n            v = uidoc.ActiveView\r\n            TransactionManager.Instance.EnsureInTransaction(doc)\r\n            for idx, e in enumerate(s_element):\r\n                try:\r\n                    column = hex_to_revit_color(color_strings[idx])\r\n                    ogs = OverrideGraphicSettings()\r\n                    # superfici\r\n                    ogs.SetSurfaceForegroundPatternId(solid_fill_id)\r\n                    ogs.SetSurfaceForegroundPatternColor(column)\r\n                    # linee\r\n                    ogs.SetProjectionLineColor(column)\r\n                    v.SetElementOverrides(e.Id, ogs)\r\n                    applied += 1\r\n                except Exception as ex:\r\n                    s_error.append(\"Errore colore per {}: {}\".format(e.UniqueId, ex))\r\n            TransactionManager.Instance.TransactionTaskDone()\r\n        else:\r\n            s_error.append(\"Override non applicato (Active View non disponibile o Solid Fill mancante).\")\r\n    except Exception as ex:\r\n        s_error.append(\"Lettura/applicazione colori fallita: {}\".format(ex))\r\n\r\n# --- Output report ---\r\nOUT['More'] = {\r\n    \"elements_exported\": len(s_element),\r\n    \"excel_written\": excel_info,\r\n    \"external_script\": {\"exit_code\": ext_code, \"output\": ext_text} if python_script_external_pathandname else None,\r\n    \"colors_applied\": applied,\r\n    \"errors\": s_error\r\n}\r\n\"\"\"\r\n\r\ndebug_dynamo_file_pathandname = os.path.join(output_folder_path, 'debug_dynamo.json')\r\nwith open(debug_dynamo_file_pathandname, 'w') as file:\r\n    json.dump(OUT, file)\r\n\r\npass\r\n",
+      "Engine": "CPython3",
+      "EngineName": "CPython3",
+      "VariableInputPorts": true,
+      "Id": "63a299df466d4eb0b4cf0c2649b63c67",
+      "NodeType": "PythonScriptNode",
+      "Inputs": [
+        {
+          "Id": "8b2c054256e34523bcc1041a724cbd7b",
+          "Name": "IN[0]",
+          "Description": "Input #0",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "744b89356cb24a7e9428549cc39f28d1",
+          "Name": "IN[1]",
+          "Description": "Input #1",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "b74ede00b1574a409bbd6e34bc7887fe",
+          "Name": "IN[2]",
+          "Description": "Input #2",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "b9fecc09ae014ae18817c187770e4d01",
+          "Name": "IN[3]",
+          "Description": "Input #3",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "0c87f884da874662990003f1c093a4c2",
+          "Name": "IN[4]",
+          "Description": "Input #4",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "9bbbb86c30204ff6a7b8966cf710b0cc",
+          "Name": "IN[5]",
+          "Description": "Input #5",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "7ea411fe20f342fc8fbe80bdced8be90",
+          "Name": "OUT",
+          "Description": "Risultato dello script Python",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Esegue uno script Python incorporato."
+    },
+    {
+      "ConcreteType": "CoreNodeModels.Watch, CoreNodeModels",
+      "WatchWidth": 200.0,
+      "WatchHeight": 200.0,
+      "Id": "460551abbff04136a2d00e250ea3f947",
+      "NodeType": "ExtensionNode",
+      "Inputs": [
+        {
+          "Id": "f2245535945345e7871c4eca20a9bc7e",
+          "Name": "",
+          "Description": "Nodo di cui mostrare l'output",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "51c8445613754bf994f8c86df535ab52",
+          "Name": "",
+          "Description": "Output del nodo",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Visualizza l'output del nodo"
+    }
+  ],
+  "Connectors": [
+    {
+      "Start": "d394451b87294080a124400de2aa6427",
+      "End": "13fe085a4f7842bfbad70276b3adb436",
+      "Id": "aabe9a5557e24e7fbc6bc6de0184e7a9",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "321a8d1516c44b1cbe6775ebe11409bf",
+      "End": "f2245535945345e7871c4eca20a9bc7e",
+      "Id": "d49ba0288529450ca73dbbe5225965eb",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "1cf04942fbe44f478b7f55b479b79511",
+      "End": "494ce212346e4306a944957fa5f973ec",
+      "Id": "932dfa4ae62744f9a237951f3082d512",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "1e64b457882d45389f517f505b1daffc",
+      "End": "29327c55a68543278ac49b4806f949e8",
+      "Id": "49bc37630d9f49babf0902862e75c7e6",
+      "IsHidden": "False"
+    }
+  ],
+  "Dependencies": [],
+  "NodeLibraryDependencies": [],
+  "Thumbnail": "",
+  "GraphDocumentationURL": null,
+  "ExtensionWorkspaceData": [
+    {
+      "ExtensionGuid": "28992e1d-abb9-417f-8b1b-05e053bee670",
+      "Name": "Properties",
+      "Version": "2.18",
+      "Data": {}
+    },
+    {
+      "ExtensionGuid": "DFBD9CC0-DB40-457A-939E-8C8555555A9D",
+      "Name": "Generative Design",
+      "Version": "6.0",
+      "Data": {}
+    }
+  ],
+  "Author": "",
+  "Linting": {
+    "activeLinter": "Nessuno",
+    "activeLinterId": "7b75fb44-43fd-4631-a878-29f4d5d8399a",
+    "warningCount": 0,
+    "errorCount": 0
+  },
+  "Bindings": [],
+  "View": {
+    "Dynamo": {
+      "ScaleFactor": 1.0,
+      "HasRunWithoutCrash": true,
+      "IsVisibleInDynamoLibrary": true,
+      "Version": "2.19.3.6394",
+      "RunType": "Manual",
+      "RunPeriod": "1000"
+    },
+    "Camera": {
+      "Name": "_Anteprima sfondo",
+      "EyeX": -17.0,
+      "EyeY": 24.0,
+      "EyeZ": 50.0,
+      "LookX": 12.0,
+      "LookY": -13.0,
+      "LookZ": -58.0,
+      "UpX": 0.0,
+      "UpY": 1.0,
+      "UpZ": 0.0
+    },
+    "ConnectorPins": [],
+    "NodeViews": [
+      {
+        "Id": "29f5cf4035a04ebda440e8a0db489600",
+        "Name": "start_file0_pathandname",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 77.535866341084329,
+        "Y": -72.054702016384226
+      },
+      {
+        "Id": "7bf3d439706845e990982fa709430201",
+        "Name": "Python Script",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 868.517418259173,
+        "Y": 15.952254777518192
+      },
+      {
+        "Id": "0b4c6235b7b54b288af67e488df15fdb",
+        "Name": "s_parameter",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": -334.00902436007431,
+        "Y": -225.5739384111171
+      },
+      {
+        "Id": "3c7c4dc2b4674711ac483c3c20c7adb9",
+        "Name": "apply_in_active_view",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 125.01262016098099,
+        "Y": 156.23426235931214
+      },
+      {
+        "Id": "603e00b1763d45038acbf192e41357e9",
+        "Name": "Python Script_Originale MS",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": true,
+        "ShowGeometry": true,
+        "X": 2130.4715348235645,
+        "Y": -505.44633991721241
+      },
+      {
+        "Id": "63a299df466d4eb0b4cf0c2649b63c67",
+        "Name": "Python Script_Solo Export Excel_funzionante",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": true,
+        "ShowGeometry": true,
+        "X": 2127.1412987337658,
+        "Y": -204.58024107515132
+      },
+      {
+        "Id": "460551abbff04136a2d00e250ea3f947",
+        "Name": "Watch",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 1257.1936321163257,
+        "Y": 6.6510587363868581
+      }
+    ],
+    "Annotations": [],
+    "X": -36.459451677330208,
+    "Y": 197.45796412698178,
+    "Zoom": 0.599825020368243
+  }
+}
