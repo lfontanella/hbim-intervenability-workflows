@@ -1,1 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
 
+# Logs and temporary files
+*.log
+app.log
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+*.bak
+*.backup
+
+# Office temporary files
+~$*.xlsx
+~$*.xlsm
+~$*.docx
+~$*.pptx
+
+# Revit / BIM files not published in this repository
+*.rvt
+*.rfa
+*.rte
+*.ifc
+*.ifczip
+
+# Local machine-specific files
+*.dyn.bak
+*.dyf.bak
+settings.json
+.env
+*.env
+secrets.*
+credentials.*
