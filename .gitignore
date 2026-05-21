@@ -21,18 +21,22 @@ desktop.ini
 ~$*.docx
 ~$*.pptx
 
-# Revit / BIM files not published in this repository
+# BIM files not published in this repository
 *.rvt
 *.rfa
 *.rte
 *.ifc
 *.ifczip
 
-# Local machine-specific files
+# Dynamo/Revit backup files
 *.dyn.bak
 *.dyf.bak
-settings.json
+*.rvt.bak
+*.rfa.bak
+
+# Credentials and private configuration
 .env
 *.env
+settings.json
 secrets.*
 credentials.*
